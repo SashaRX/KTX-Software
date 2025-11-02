@@ -331,7 +331,7 @@ In the repo root run
 scripts/build_wasm_docker.sh
 ```
 
-This will build both Debug and Release configurations and will include the load test application. Builds are done with the official Emscripten Docker image. Output will be written to the folders `build/web-{debug,release}`.
+This will build both Debug and Release configurations and will include the load test application. Builds are done with the official Emscripten Docker image. Output will be written to the folders `buildwasm-{debug,release}`.
 
 If you are using Windows you will need a Unix-like shell such as the one with _Git for Windows_ or one in Windows Subsystem for Linux (WSL) to run this script.
 
@@ -343,20 +343,20 @@ Install [Emscripten](https://emscripten.org) and follow the [install instruction
 
 ```bash
 # Configure
-emcmake cmake -B build-web-debug . -D CMAKE_BUILD_TYPE=Debug
+emcmake cmake -B buildwasm-debug . -D CMAKE_BUILD_TYPE=Debug
 
 # Build
-cmake --build build-web-debug --config Debug
+cmake --build buildwasm-debug --config Debug
 ```
 
 **Release:**
 
 ```bash
 # Configure
-emcmake cmake -B build-web .
+emcmake cmake -B buildwasm .
 
 # Build
-cmake --build build-web
+cmake --build buildwasm
 ```
 
 To include the load test application into the build add `-DKTX_FEATURE_LOADTEST_APPS=ON` to either of the above configuration steps.

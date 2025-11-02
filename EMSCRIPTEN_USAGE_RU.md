@@ -70,13 +70,13 @@ build_emscripten.bat release minimal
 C:\emsdk\emsdk_env.bat
 cd D:\sourceProject\repos\KTX-Software
 
-emcmake cmake -B build-emscripten -G Ninja ^
+emcmake cmake -B buildwasm -G Ninja ^
   -DCMAKE_BUILD_TYPE=Release ^
   -DKTX_FEATURE_GL_UPLOAD=OFF ^
   -DKTX_FEATURE_VK_UPLOAD=OFF ^
   -DKTX_FEATURE_WRITE=ON
 
-cmake --build build-emscripten
+cmake --build buildwasm
 ```
 
 ---

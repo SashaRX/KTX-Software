@@ -46,10 +46,6 @@ bool generateMipmaps() const { return m_ptr->generateMipmaps; }
 **Flags Applied (CMakeLists.txt lines 183-264):**
 - `-Oz` instead of `-O3` (optimize for size, not speed)
 - `-s FILESYSTEM=0` (remove unused filesystem code)
-- `-s AGGRESSIVE_VARIABLE_ELIMINATION=1`
-- `-s ELIMINATE_DUPLICATE_FUNCTIONS=1`
-- `--closure=1` (Google Closure Compiler minification)
-- `-flto` (Link Time Optimization)
 
 **Results:**
 - `libktx.mjs`: **38 KB** (minified from ~120 KB)
@@ -73,7 +69,7 @@ bool generateMipmaps() const { return m_ptr->generateMipmaps; }
 C:\emsdk\emsdk_env.bat
 
 # 2. Configure (read-only build recommended for web)
-emcmake cmake -B build-web-release -G Ninja \
+emcmake cmake -B buildwasm-release -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DKTX_FEATURE_GL_UPLOAD=OFF \
   -DKTX_FEATURE_VK_UPLOAD=OFF \
@@ -82,9 +78,9 @@ emcmake cmake -B build-web-release -G Ninja \
   -DKTX_FEATURE_LOADTEST_APPS=OFF
 
 # 3. Build
-cmake --build build-web-release --config Release
+cmake --build buildwasm-release --config Release
 
-# 4. Output files in: build-web-release/
+# 4. Output files in: buildwasm-release/
 # - libktx_read.mjs + libktx_read.wasm (719 KB) ← USE THIS
 # - libktx.mjs + libktx.wasm (1.6 MB) - full library with encoder
 # - msc_basis_transcoder.mjs + .wasm (407 KB) - Basis only, no KTX2 API
