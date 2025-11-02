@@ -2,9 +2,46 @@
 
 ## 🎯 Что нового
 
-### ✅ Добавлены новые свойства текстуры
+### ✅ Добавлены helper функции для прямого доступа через cwrap
 
-Теперь доступны все важные свойства для работы с текстурами:
+Теперь доступны C функции для прямого доступа к данным текстуры через `cwrap()`:
+
+```javascript
+const M = await createKtxModule();
+
+// Создание обёрток для функций
+const api = {
+    malloc: M.cwrap('malloc', 'number', ['number']),
+    free: M.cwrap('free', null, ['number']),
+    createFromMemory: M.cwrap('ktxTexture2_CreateFromMemory', 'number', ['number','number','number','number']),
+    destroy: M.cwrap('ktxTexture2_Destroy', null, ['number']),
+    transcodeBasis: M.cwrap('ktxTexture2_TranscodeBasis', 'number', ['number','number','number']),
+    needsTranscoding: M.cwrap('ktxTexture2_NeedsTranscoding', 'number', ['number']),
+
+    // Helper функции для доступа к свойствам
+    getData: M.cwrap('ktx_get_data', 'number', ['number']),
+    getDataSize: M.cwrap('ktx_get_data_size', 'number', ['number']),
+    getBaseWidth: M.cwrap('ktx_get_base_width', 'number', ['number']),
+    getBaseHeight: M.cwrap('ktx_get_base_height', 'number', ['number']),
+    getBaseDepth: M.cwrap('ktx_get_base_depth', 'number', ['number']),
+    getNumLevels: M.cwrap('ktx_get_num_levels', 'number', ['number']),
+    getNumLayers: M.cwrap('ktx_get_num_layers', 'number', ['number']),
+    getNumFaces: M.cwrap('ktx_get_num_faces', 'number', ['number']),
+    getNumDimensions: M.cwrap('ktx_get_num_dimensions', 'number', ['number']),
+    getIsArray: M.cwrap('ktx_get_is_array', 'number', ['number']),
+    getIsCubemap: M.cwrap('ktx_get_is_cubemap', 'number', ['number']),
+    getIsCompressed: M.cwrap('ktx_get_is_compressed', 'number', ['number']),
+    getVkFormat: M.cwrap('ktx_get_vk_format', 'number', ['number']),
+    getSupercompressionScheme: M.cwrap('ktx_get_supercompression_scheme', 'number', ['number']),
+    getImageOffset: M.cwrap('ktx_get_image_offset', 'number', ['number','number','number','number','number']),
+    getImageSize: M.cwrap('ktx_get_image_size', 'number', ['number','number']),
+    errorString: M.cwrap('ktxErrorString', 'string', ['number'])
+};
+```
+
+### ✅ Добавлены новые свойства текстуры (через embind API)
+
+Теперь доступны все важные свойства для работы с текстурами через embind:
 
 ```javascript
 const texture = new ktx.texture(ktx2Data);
@@ -83,7 +120,104 @@ cmake --build buildwasm
 
 ## 💡 Примеры использования
 
-### Пример 1: Загрузка и распаковка KTX2 для PlayCanvas
+### Пример 0: Использование cwrap API для прямого доступа к функциям
+
+Если вы предпочитаете использовать прямые вызовы функций через cwrap вместо embind API:
+
+```javascript
+import createKtxModule from './libktx.mjs';
+
+async function loadKTX2WithCwrap(url) {
+    // 1. Инициализация модуля
+    const M = await createKtxModule();
+
+    // 2. Создание API обёрток
+    const api = {
+        malloc: M.cwrap('malloc', 'number', ['number']),
+        free: M.cwrap('free', null, ['number']),
+        createFromMemory: M.cwrap('ktxTexture2_CreateFromMemory', 'number', ['number','number','number','number']),
+        destroy: M.cwrap('ktxTexture2_Destroy', null, ['number']),
+        transcodeBasis: M.cwrap('ktxTexture2_TranscodeBasis', 'number', ['number','number','number']),
+        needsTranscoding: M.cwrap('ktxTexture2_NeedsTranscoding', 'number', ['number']),
+
+        // Helper функции
+        getBaseWidth: M.cwrap('ktx_get_base_width', 'number', ['number']),
+        getBaseHeight: M.cwrap('ktx_get_base_height', 'number', ['number']),
+        getNumLevels: M.cwrap('ktx_get_num_levels', 'number', ['number']),
+        getVkFormat: M.cwrap('ktx_get_vk_format', 'number', ['number']),
+        getData: M.cwrap('ktx_get_data', 'number', ['number']),
+        getDataSize: M.cwrap('ktx_get_data_size', 'number', ['number']),
+        getImageOffset: M.cwrap('ktx_get_image_offset', 'number', ['number','number','number','number','number']),
+        getImageSize: M.cwrap('ktx_get_image_size', 'number', ['number','number']),
+        errorString: M.cwrap('ktxErrorString', 'string', ['number'])
+    };
+
+    // 3. Загрузка файла
+    const response = await fetch(url);
+    const ktx2Data = new Uint8Array(await response.arrayBuffer());
+
+    // 4. Выделение памяти и копирование данных
+    const dataPtr = api.malloc(ktx2Data.byteLength);
+    M.HEAP8.set(ktx2Data, dataPtr);
+
+    // 5. Создание текстуры
+    const texturePtr = api.malloc(4); // указатель на указатель
+    const flags = 1; // KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT
+
+    const result = api.createFromMemory(dataPtr, ktx2Data.byteLength, flags, texturePtr);
+
+    if (result !== 0) { // KTX_SUCCESS = 0
+        console.error('Failed to create texture:', api.errorString(result));
+        api.free(dataPtr);
+        api.free(texturePtr);
+        return null;
+    }
+
+    // 6. Получение указателя на текстуру
+    const texture = M.getValue(texturePtr, 'i32');
+
+    // 7. Чтение свойств текстуры
+    console.log('Texture info:');
+    console.log('  Width:', api.getBaseWidth(texture));
+    console.log('  Height:', api.getBaseHeight(texture));
+    console.log('  Levels:', api.getNumLevels(texture));
+    console.log('  Format:', api.getVkFormat(texture));
+
+    // 8. Транскодирование если необходимо
+    if (api.needsTranscoding(texture)) {
+        const targetFormat = 10; // KTX_TTF_ASTC_4x4_RGBA
+        const transcodeResult = api.transcodeBasis(texture, targetFormat, 0);
+
+        if (transcodeResult !== 0) {
+            console.error('Transcode failed:', api.errorString(transcodeResult));
+        }
+    }
+
+    // 9. Получение данных текстуры
+    const dataOffset = api.getData(texture);
+    const dataSize = api.getDataSize(texture);
+    const textureData = new Uint8Array(M.HEAP8.buffer, dataOffset, dataSize);
+
+    // 10. Очистка
+    api.free(dataPtr);
+    api.free(texturePtr);
+
+    // Не вызываем destroy если нужно сохранить данные
+    // api.destroy(texture);
+
+    return {
+        texture,
+        data: textureData,
+        width: api.getBaseWidth(texture),
+        height: api.getBaseHeight(texture),
+        levels: api.getNumLevels(texture),
+        api, // сохраняем API для последующего использования
+        module: M
+    };
+}
+```
+
+### Пример 1: Загрузка и распаковка KTX2 для PlayCanvas (embind API)
 
 ```javascript
 import createKtxModule from './libktx.mjs';
