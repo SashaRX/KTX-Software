@@ -257,8 +257,10 @@ if(EMSCRIPTEN AND KTX_FEATURE_JS)
         "SHELL:-s EXPORT_ES6=1"
         "SHELL:-s FILESYSTEM=0"
         "SHELL:-s NO_EXIT_RUNTIME=1"
+        "SHELL:-s ASSERTIONS=0"
         "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','getValue','setValue','HEAPU8','GL','HEAP8']"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','getValue','setValue','UTF8ToString','HEAPU8','GL','HEAP8']"
+        "SHELL:-s EXPORTED_FUNCTIONS=['_malloc','_free','_ktxTexture2_CreateFromMemory','_ktxTexture2_Destroy','_ktxTexture2_TranscodeBasis','_ktxTexture2_NeedsTranscoding','_ktx_get_data','_ktx_get_data_size','_ktx_get_base_width','_ktx_get_base_height','_ktx_get_base_depth','_ktx_get_num_levels','_ktx_get_num_layers','_ktx_get_num_faces','_ktx_get_num_dimensions','_ktx_get_is_array','_ktx_get_is_cubemap','_ktx_get_is_compressed','_ktx_get_vk_format','_ktx_get_supercompression_scheme','_ktx_get_image_offset','_ktx_get_image_size','_ktxErrorString']"
         "SHELL:-s GL_PREINITIALIZED_CONTEXT=1"
     )
 

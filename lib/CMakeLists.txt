@@ -264,6 +264,13 @@ if(LIBKTX_FEATURE_GL_UPLOAD)
     )
 endif()
 
+# Emscripten helper functions for direct access to ktxTexture2 members
+if(EMSCRIPTEN)
+    list(APPEND LIBKTX_MAIN_SRC
+        src/ktx_emscripten_helpers.c
+    )
+endif()
+
 # Main library
 add_library( ktx ${LIB_TYPE}
     ${LIBKTX_MAIN_SRC}
