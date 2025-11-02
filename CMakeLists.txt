@@ -260,11 +260,6 @@ if(EMSCRIPTEN AND KTX_FEATURE_JS)
         "SHELL:-s ALLOW_MEMORY_GROWTH=1"
         "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','getValue','setValue','HEAPU8','GL','HEAP8']"
         "SHELL:-s GL_PREINITIALIZED_CONTEXT=1"
-        # Size optimization flags
-        "SHELL:-s AGGRESSIVE_VARIABLE_ELIMINATION=1"
-        "SHELL:-s ELIMINATE_DUPLICATE_FUNCTIONS=1"
-        $<$<CONFIG:Release>:--closure=1>
-        $<$<CONFIG:Release>:-flto>
     )
 
     set(

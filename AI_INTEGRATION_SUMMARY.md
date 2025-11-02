@@ -9,8 +9,8 @@ I've prepared **KTX-Software** for web use with **PlayCanvas Engine**. The libra
 ## Files to Use
 
 **Copy these to your project:**
-- `build-web-release/libktx_read.mjs` (36 KB minified)
-- `build-web-release/libktx_read.wasm` (719 KB optimized)
+- `buildwasm-release/libktx_read.mjs` (36 KB minified)
+- `buildwasm-release/libktx_read.wasm` (719 KB optimized)
 
 **Import:**
 ```javascript
@@ -171,7 +171,7 @@ const hasASTC = gl.getExtension('WEBGL_compressed_texture_astc');
 
 ### 3. File Size
 **Before:** 1.4 MB libktx_read.a (static lib)
-**After:** 719 KB libktx_read.wasm (49% reduction via `-Oz`, `--closure`, `-flto`)
+**After:** 719 KB libktx_read.wasm (49% reduction via `-Oz`)
 
 ### 4. Emscripten 4.0.18 Compatibility
 **Before:** Custom Module.ready implementation conflicted with built-in

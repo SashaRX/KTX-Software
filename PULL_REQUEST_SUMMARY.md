@@ -5,7 +5,7 @@
 This PR optimizes KTX-Software for modern web usage with focus on:
 1. **ES6 module support** (.mjs files for bundlers)
 2. **Critical missing properties** (texture.numLevels for mipmap iteration)
-3. **Size optimization** (49% reduction via -Oz, Closure Compiler, LTO)
+3. **Size optimization** (via -Oz flag for Emscripten)
 4. **Emscripten 4.0.18 compatibility** (removed conflicting Module.ready)
 
 **Target use case:** Progressive mipmap texture streaming in PlayCanvas Engine
@@ -61,7 +61,7 @@ Added flags:
 
 **File:** `CMakeLists.txt` (lines 183-264)
 
-Applied aggressive size optimization:
+Applied size optimization:
 
 ```cmake
 # Override CMake default -O3 with -Oz for size
@@ -70,10 +70,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -Oz" CACHE STRING "" FORCE)
 
 # Additional flags
 -s FILESYSTEM=0                      # Remove unused FS code
--s AGGRESSIVE_VARIABLE_ELIMINATION=1
--s ELIMINATE_DUPLICATE_FUNCTIONS=1
---closure=1                          # Google Closure Compiler
--flto                                # Link Time Optimization
 ```
 
 **Results:**
@@ -94,6 +90,7 @@ Removed custom `post_ready.js`:
 **Fixed LLVM crash:**
 - CMake was adding both `-O3` (speed) and `-Oz` (size) → LLVM segfault on ZSTD compilation
 - Solution: Override `CMAKE_C_FLAGS_RELEASE` to force `-Oz` only
+- Removed minification flags (--closure, -flto) to improve build compatibility
 
 ---
 
@@ -131,7 +128,7 @@ Russian language build and usage guide with 5 detailed examples.
 C:\emsdk\emsdk_env.bat
 
 # Configure
-emcmake cmake -B build-web-release -G Ninja \
+emcmake cmake -B buildwasm-release -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DKTX_FEATURE_GL_UPLOAD=OFF \
   -DKTX_FEATURE_VK_UPLOAD=OFF \
@@ -140,9 +137,9 @@ emcmake cmake -B build-web-release -G Ninja \
   -DKTX_FEATURE_LOADTEST_APPS=OFF
 
 # Build
-cmake --build build-web-release --config Release
+cmake --build buildwasm-release --config Release
 
-# Output: build-web-release/
+# Output: buildwasm-release/
 # - libktx_read.mjs + libktx_read.wasm (719 KB) ← Recommended
 # - libktx.mjs + libktx.wasm (1.6 MB) - with encoder
 # - msc_basis_transcoder.mjs + .wasm (407 KB) - Basis only
@@ -231,7 +228,6 @@ Tested on:
 - ✅ Transcode to BC7/ETC2/ASTC succeeds
 - ✅ File sizes reduced 49% (libktx_read)
 - ✅ ES6 module import works in Vite/Webpack
-- ✅ No Closure Compiler errors
 - ✅ No LLVM crashes during build
 
 ---
@@ -301,7 +297,6 @@ Potential optimizations not included in this PR:
 ## References
 
 - [Emscripten 4.0.18 Release Notes](https://github.com/emscripten-core/emscripten/releases/tag/4.0.18)
-- [Google Closure Compiler](https://developers.google.com/closure/compiler)
 - [WebGL Compressed Textures](https://www.khronos.org/webgl/wiki/Using_Compressed_Textures_in_WebGL)
 - [Basis Universal](https://github.com/BinomialLLC/basis_universal)
 
