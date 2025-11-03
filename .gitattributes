@@ -78,3 +78,4 @@ tests/clitests/input/images/**/*.exr filter=lfs -text
 tests/clitests/golden/images/**/*.ktx2 filter=lfs -text
 tests/clitests/golden/images/**/*.png filter=lfs -text
 tests/clitests/golden/images/**/*.exr filter=lfs -text
+tests/webgl/**/*.wasm filter=lfs -text
