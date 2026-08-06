@@ -137,6 +137,8 @@ set(LIBKTX_MAIN_SRC
     src/astc_codec.cpp
     src/basis_sgd.h
     src/basis_transcode.cpp
+    src/basis_transcode.h
+    src/level_processor.cpp
     src/miniz_wrapper.cpp
     src/checkheader.c
     src/etcunpack.cxx
