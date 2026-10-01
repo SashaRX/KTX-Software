@@ -61,11 +61,11 @@ jobs:
             toolset: CLangCL
           - os: windows-11-arm
             config: Release
-            generator: 'Visual Studio 17 2022'
+            generator: 'Visual Studio 18 2026'
             toolset: v143
           - os: windows-11-arm
             config: Release
-            generator: 'Visual Studio 17 2022'
+            generator: 'Visual Studio 18 2026'
             toolset: CLangCL
 
     runs-on: ${{ matrix.os }}
