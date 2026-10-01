@@ -171,7 +171,9 @@ ktx2transcoderFormat(ktx_transcode_fmt_e ktx_fmt) {
  *                              does not have power-of-two dimensions.
  * @exception KTX_INVALID_VALUE @p outputFormat is invalid.
  * @exception KTX_TRANSCODE_FAILED
- *                              Something went wrong during transcoding.
+ *                              Something went wrong during transcoding,
+ *                              including BasisLZ palettes or tables that
+ *                              cannot be decoded.
  * @exception KTX_UNSUPPORTED_FEATURE
  *                              KTX_TF_PVRTC_DECODE_TO_NEXT_POW2 was requested
  *                              or the specified transcode target has not been
@@ -539,7 +541,9 @@ ktx2transcoderFormat(ktx_transcode_fmt_e ktx_fmt) {
  * @exception KTX_FILE_DATA_ERROR
  *                              Supercompression global data is corrupted.
  * @exception KTX_TRANSCODE_FAILED
- *                              Something went wrong during transcoding. The
+ *                              The palettes or tables in the supercompression
+ *                              global data cannot be decoded or something
+ *                              else went wrong during transcoding. The
  *                              texture object will be corrupted.
  * @exception KTX_OUT_OF_MEMORY Not enough memory to carry out transcoding.
  */
@@ -604,13 +608,19 @@ ktxTexture2_transcodeLzEtc1s(ktxTexture2* This,
     std::vector<basisu_transcoder_state> xcoderStates;
     xcoderStates.resize(This->isVideo ? This->numFaces : 1);
 
-    bit.decode_palettes(bgdh.endpointCount, BGD_ENDPOINTS_ADDR(bgd, imageCount),
-                        bgdh.endpointsByteLength,
-                        bgdh.selectorCount, BGD_SELECTORS_ADDR(bgd, bgdh, imageCount),
-                        bgdh.selectorsByteLength);
-
-    bit.decode_tables(BGD_TABLES_ADDR(bgd, bgdh, imageCount),
-                      bgdh.tablesByteLength);
+    // transcode_image reads through the palettes and tables without checking
+    // them so stop if they fail to decode, as basisu's own callers do.
+    if (!bit.decode_palettes(bgdh.endpointCount,
+                             BGD_ENDPOINTS_ADDR(bgd, imageCount),
+                             bgdh.endpointsByteLength,
+                             bgdh.selectorCount,
+                             BGD_SELECTORS_ADDR(bgd, bgdh, imageCount),
+                             bgdh.selectorsByteLength)
+        || !bit.decode_tables(BGD_TABLES_ADDR(bgd, bgdh, imageCount),
+                              bgdh.tablesByteLength)) {
+        delete[] firstImages;
+        return KTX_TRANSCODE_FAILED;
+    }
 
     // Find matching VkFormat and calculate output sizes.
 
