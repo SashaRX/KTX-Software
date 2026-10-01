@@ -3,9 +3,36 @@
 
 # gtest based unit-tests
 
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.18.0
+)
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON)
+set(BUILD_GMOCK OFF)
+FetchContent_MakeAvailable(googletest)
+
 include(GoogleTest)
 
-add_subdirectory(gtest)
+function(override_gtest_output_dirs target)
+set_target_properties(${target}
+    # CMake sets these properties based on ${CMAKE_BINARY_DIR}
+    # instead of following the CMAKE_*_OUTPUT_DIRECTORY settings.
+    # To avoid issues with finding the gtest dlls, override to
+    # our global settings.
+    PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
+        PDB_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        COMPILE_PDB_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
+    )
+endfunction()
+override_gtest_output_dirs(gtest)
+override_gtest_output_dirs(gtest_main)
+
 find_package(Threads)
 
 # This setting is critical when cross compiling and on Apple
@@ -47,7 +74,7 @@ set_test_properties(unittests)
 set_code_sign(unittests)
 
 target_compile_features( unittests PUBLIC cxx_std_20 )
- 
+
 target_include_directories(
     unittests
 PRIVATE
@@ -66,7 +93,7 @@ SYSTEM PRIVATE
 
 target_link_libraries(
     unittests
-    gtest
+    GTest::gtest_main
     ktx
     fmt::fmt
     ${CMAKE_THREAD_LIBS_INIT}
@@ -98,7 +125,7 @@ PRIVATE
 
 target_link_libraries(
     texturetests
-    gtest
+    GTest::gtest_main
     ktx
     "$<${is_stdformat_unsupported}:fmt::fmt>"
     ${CMAKE_THREAD_LIBS_INIT}
