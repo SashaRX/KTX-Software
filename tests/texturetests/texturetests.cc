@@ -1178,6 +1178,30 @@ TEST_F(ktxTexture2_LoadImageDataTest, LoadImageDataExternal) {
     }
 }
 
+TEST_F(ktxTexture2_LoadImageDataTest, FailedLoadLeavesNoImageData) {
+    ktxTexture_unique_ptr texture_raii{nullptr, ktxTexture_Deleter};
+    KTX_error_code result;
+
+    if (ktxMemFile != NULL) {
+        // Without its last byte the source does not have all the image data.
+        ktxTexture* texture = nullptr;
+        result = ktxTexture_CreateFromMemory(ktxMemFile.get(), ktxMemFileLen - 1,
+                                             0,
+                                             &texture);
+        texture_raii.reset(texture);
+        EXPECT_EQ(result, KTX_SUCCESS);
+        ASSERT_TRUE(texture != NULL) << "ktxTexture_CreateFromMemory failed: "
+                                     << ktxErrorString(result);
+        EXPECT_EQ(ktxTexture_LoadImageData(texture, NULL, 0),
+                  KTX_FILE_UNEXPECTED_EOF);
+        EXPECT_TRUE(texture->pData == NULL);
+        // The load fails the same way when tried again.
+        EXPECT_EQ(ktxTexture_LoadImageData(texture, NULL, 0),
+                  KTX_FILE_UNEXPECTED_EOF);
+        EXPECT_TRUE(texture->pData == NULL);
+    }
+}
+
 /////////////////////////////////////////
 // ktxTexture2 invalid creation params tests.
 ////////////////////////////////////////
@@ -1314,6 +1338,99 @@ TEST_F(ktxTexture2_CreateCopyTest, CreateCopy) {
         EXPECT_EQ(memcmp(texture->_private, copyTexture->_private,
                          privateSize), 0);
     }
+}
+
+TEST_F(ktxTexture2_CreateCopyTest, FailsWhenImageDataCannotBeLoaded) {
+    ktxTexture_unique_ptr texture_raii{nullptr, ktxTexture_Deleter};
+    ktxTexture_unique_ptr copyTexture_raii{nullptr, ktxTexture_Deleter};
+    KTX_error_code result;
+
+    if (ktxMemFile != nullptr) {
+        // Without its last byte the source does not have all the image data.
+        ktxTexture2* texture = nullptr;
+        result = ktxTexture_CreateFromMemory(ktxMemFile.get(), ktxMemFileLen - 1,
+                                             0,
+                                             (ktxTexture**)&texture);
+        texture_raii.reset((ktxTexture*)texture);
+        EXPECT_EQ(result, KTX_SUCCESS);
+        ASSERT_TRUE(texture != NULL) << "ktxTexture_CreateFromMemory failed: "
+                                     << ktxErrorString(result);
+        // The copy must not be made: it would share the texture's stream,
+        // which destroying both would destruct twice. Then again, after the
+        // first load has failed.
+        for (int i = 0; i < 2; i++) {
+            ktxTexture2* copyTexture = nullptr;
+            result = ktxTexture2_CreateCopy(texture, &copyTexture);
+            copyTexture_raii.reset((ktxTexture*)copyTexture);
+            EXPECT_EQ(result, KTX_FILE_UNEXPECTED_EOF);
+            EXPECT_TRUE(copyTexture == NULL);
+            EXPECT_TRUE(texture->pData == NULL);
+        }
+    }
+}
+
+TEST_F(ktxTexture2_CreateCopyTest, CopiesTextureWithImageDataInCallerBuffer) {
+    ktxTexture_unique_ptr texture_raii{nullptr, ktxTexture_Deleter};
+    ktxTexture_unique_ptr copyTexture_raii{nullptr, ktxTexture_Deleter};
+    KTX_error_code result;
+
+    if (ktxMemFile != nullptr) {
+        ktxTexture2* texture = nullptr;
+        result = ktxTexture_CreateFromMemory(ktxMemFile.get(), ktxMemFileLen,
+                                             0,
+                                             (ktxTexture**)&texture);
+        texture_raii.reset((ktxTexture*)texture);
+        EXPECT_EQ(result, KTX_SUCCESS);
+        ASSERT_TRUE(texture != NULL) << "ktxTexture_CreateFromMemory failed: "
+                                     << ktxErrorString(result);
+        auto buf = std::make_unique<ktx_uint8_t[]>(texture->dataSize);
+        EXPECT_EQ(ktxTexture2_LoadImageData(texture, buf.get(), texture->dataSize),
+                  KTX_SUCCESS);
+        ASSERT_TRUE(texture->pData == NULL);
+
+        ktxTexture2* copyTexture = nullptr;
+        result = ktxTexture2_CreateCopy(texture, &copyTexture);
+        copyTexture_raii.reset((ktxTexture*)copyTexture);
+        EXPECT_EQ(result, KTX_SUCCESS);
+        ASSERT_TRUE(copyTexture != NULL) << "ktxTexture2_CreateCopy failed: "
+                                         << ktxErrorString(result);
+        EXPECT_EQ(compareTexture(copyTexture), true);
+        EXPECT_EQ(copyTexture->dataSize, texture->dataSize);
+        EXPECT_TRUE(copyTexture->pData == NULL);
+    }
+}
+
+TEST_F(ktxTexture2_CreateCopyTest, CopiesTextureCreatedWithNoStorage) {
+    ktxTexture_unique_ptr texture_raii{nullptr, ktxTexture_Deleter};
+    ktxTexture_unique_ptr copyTexture_raii{nullptr, ktxTexture_Deleter};
+    KTX_error_code result;
+
+    ktxTextureCreateInfo createInfo;
+    createInfo.vkFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    createInfo.baseWidth = 16;
+    createInfo.baseHeight = 16;
+    createInfo.baseDepth = 1;
+    createInfo.numDimensions = 2;
+    createInfo.numLevels = 5;
+    createInfo.numLayers = 1;
+    createInfo.numFaces = 1;
+    createInfo.isArray = KTX_FALSE;
+    createInfo.generateMipmaps = KTX_FALSE;
+    ktxTexture2* texture = nullptr;
+    result = ktxTexture2_Create(&createInfo, KTX_TEXTURE_CREATE_NO_STORAGE,
+                                &texture);
+    texture_raii.reset((ktxTexture*)texture);
+    ASSERT_EQ(result, KTX_SUCCESS);
+    ASSERT_TRUE(texture->pData == NULL);
+
+    ktxTexture2* copyTexture = nullptr;
+    result = ktxTexture2_CreateCopy(texture, &copyTexture);
+    copyTexture_raii.reset((ktxTexture*)copyTexture);
+    EXPECT_EQ(result, KTX_SUCCESS);
+    ASSERT_TRUE(copyTexture != NULL) << "ktxTexture2_CreateCopy failed: "
+                                     << ktxErrorString(result);
+    EXPECT_EQ(copyTexture->numLevels, 5u);
+    EXPECT_TRUE(copyTexture->pData == NULL);
 }
 
 /////////////////////////////////////////////
