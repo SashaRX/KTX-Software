@@ -9,12 +9,172 @@
 #include <emscripten/bind.h>
 #include <ktx.h>
 #include "vkformat_enum.h"
+#include <cstdint>
+#include <cstring>
 #include <iostream>
+#include <memory>
+#include <new>
 
 using namespace emscripten;
 
 namespace ktx
 {
+    // Copy the bytes of an ArrayBuffer or of any ArrayBufferView into a new
+    // buffer in the WASM heap. Anything else, or a length other than
+    // expectedSize when one is given, is KTX_INVALID_VALUE.
+    static ktx_error_code_e copyFromJS(const val& data,
+                                       std::unique_ptr<uint8_t[]>& bytes,
+                                       size_t& size,
+                                       ktx_uint64_t expectedSize = UINT64_MAX)
+    {
+        bool isView = val::global("ArrayBuffer").call<bool>("isView", data);
+        if (!isView && !data.instanceof(val::global("ArrayBuffer")))
+            return KTX_INVALID_VALUE;
+        size = data["byteLength"].as<size_t>();
+        if (expectedSize != UINT64_MAX && size != expectedSize)
+            return KTX_INVALID_VALUE;
+        // The allocation can grow the WASM memory, which detaches the views
+        // of it made before. So a view of the WASM memory itself is copied
+        // from its address, and the view of the new buffer is made after
+        // the allocation.
+        bool inHeap = isView && data["buffer"].strictlyEquals(
+                          val::module_property("HEAP8")["buffer"]);
+        size_t heapAddress = inHeap ? data["byteOffset"].as<size_t>() : 0;
+        bytes.reset(new (std::nothrow) uint8_t[size]);
+        if (!bytes)
+            return KTX_OUT_OF_MEMORY;
+        if (inHeap) {
+            memcpy(bytes.get(), reinterpret_cast<const uint8_t*>(heapAddress),
+                   size);
+        } else {
+            val Uint8Array = val::global("Uint8Array");
+            val source = isView ? Uint8Array.new_(data["buffer"],
+                                                  data["byteOffset"],
+                                                  data["byteLength"])
+                                : Uint8Array.new_(data);
+            val(typed_memory_view(size, bytes.get())).call<void>("set", source);
+        }
+        return KTX_SUCCESS;
+    }
+
+    // What the getters that return a size or an offset return: the value,
+    // or null after printing the error.
+    static val sizeOrNull(const char* function, ktx_error_code_e result,
+                          ktx_size_t value)
+    {
+        if (result != KTX_SUCCESS) {
+            std::cout << "ERROR: Failed to " << function << ": " << ktxErrorString(result) << std::endl;
+            return val::null();
+        }
+        return val(value);
+    }
+
+    // Owns the output of levelProcessor.processLevel.
+    class processed_level
+    {
+    public:
+        processed_level(std::unique_ptr<uint8_t[]> data, size_t size)
+            : m_data{ std::move(data) }, m_size{ size }
+        {
+        }
+
+        // A view of the processed level in the WASM heap. It is valid
+        // until this object is deleted or the WASM memory grows.
+        val getTypedMemoryView() const
+        {
+            return val(typed_memory_view(m_size, m_data.get()));
+        }
+
+    private:
+        std::unique_ptr<uint8_t[]> m_data;
+        size_t m_size;
+    };
+
+    class level_processor
+    {
+    public:
+        // The processor borrows the source texture, so it keeps a reference
+        // to it: deleting the JS texture does not destroy a source that a
+        // processor still uses.
+        level_processor(ktxLevelProcessor* processor,
+                        std::shared_ptr<ktxTexture> source)
+            : m_source{ std::move(source) },
+              m_ptr{ processor, &ktxLevelProcessor_Destroy }
+        {
+        }
+
+        uint32_t outputVkFormat() const
+        {
+            return ktxLevelProcessor_GetOutputVkFormat(m_ptr.get());
+        }
+
+        val getLevelSize(uint32_t level) const
+        {
+            ktx_size_t size = 0;
+            ktx_error_code_e result =
+                ktxLevelProcessor_GetLevelSize(m_ptr.get(), level, &size);
+            return sizeOrNull("getLevelSize", result, size);
+        }
+
+        val getImageSize(uint32_t level) const
+        {
+            ktx_size_t size = 0;
+            ktx_error_code_e result =
+                ktxLevelProcessor_GetImageSize(m_ptr.get(), level, &size);
+            return sizeOrNull("getImageSize", result, size);
+        }
+
+        val getImageOffset(uint32_t level, uint32_t layer,
+                           uint32_t faceSlice) const
+        {
+            ktx_size_t offset = 0;
+            ktx_error_code_e result =
+                ktxLevelProcessor_GetImageOffset(m_ptr.get(), level, layer,
+                                                 faceSlice, &offset);
+            return sizeOrNull("getImageOffset", result, offset);
+        }
+
+        std::unique_ptr<processed_level> processLevel(uint32_t level,
+                                                      const val& payload)
+        {
+            ktx_size_t levelSize;
+            ktx_error_code_e result =
+                ktxLevelProcessor_GetLevelSize(m_ptr.get(), level, &levelSize);
+            // Check the payload's length before copying it: a wrong one
+            // fails anyway, and can be much larger than the level.
+            ktxLevelFileInfo fileInfo;
+            if (result == KTX_SUCCESS)
+                result = ktxTexture2_GetLevelFileInfo(
+                             reinterpret_cast<ktxTexture2*>(m_source.get()),
+                             level, &fileInfo);
+            std::unique_ptr<uint8_t[]> src;
+            size_t srcSize;
+            if (result == KTX_SUCCESS)
+                result = copyFromJS(payload, src, srcSize, fileInfo.byteLength);
+            std::unique_ptr<uint8_t[]> dst;
+            if (result == KTX_SUCCESS) {
+                dst.reset(new (std::nothrow) uint8_t[levelSize]);
+                if (!dst)
+                    result = KTX_OUT_OF_MEMORY;
+            }
+            if (result == KTX_SUCCESS)
+                result = ktxLevelProcessor_ProcessLevel(m_ptr.get(), level,
+                                                        src.get(), srcSize,
+                                                        dst.get(), levelSize);
+            if (result != KTX_SUCCESS) {
+                std::cout << "ERROR: Failed to processLevel: " << ktxErrorString(result) << std::endl;
+                return nullptr;
+            }
+            return std::make_unique<processed_level>(std::move(dst), levelSize);
+        }
+
+    private:
+        // Declared first so that it is released after the processor.
+        std::shared_ptr<ktxTexture> m_source;
+        std::unique_ptr<ktxLevelProcessor,
+                        decltype(&ktxLevelProcessor_Destroy)> m_ptr;
+    };
+
     class texture
     {
     private:
@@ -34,10 +194,13 @@ namespace ktx
 
         static void destroy(ktxTexture* ptr)
         {
-            ktxTexture_Destroy(ptr);
+            // A shared_ptr calls its deleter even when it holds nullptr.
+            if (ptr)
+                ktxTexture_Destroy(ptr);
         }
 
-        std::unique_ptr<ktxTexture, decltype(&destroy)> m_ptr;
+        // Shared with the level processors created from this texture.
+        std::shared_ptr<ktxTexture> m_ptr;
 
     public:
         operator ktxTexture2*() const {
@@ -53,10 +216,6 @@ namespace ktx
 
         texture(const val& data) : m_ptr{ nullptr, &destroy }
         {
-            std::vector<uint8_t> bytes{};
-            bytes.resize(data["byteLength"].as<size_t>());
-            val memory = emscripten::val::module_property("HEAP8")["buffer"];
-            val memoryView = data["constructor"].new_(memory, reinterpret_cast<uintptr_t>(bytes.data()), data["length"].as<uint32_t>());
             // Yes, this code IS copying the data. Sigh! According to Alon
             // Zakai:
             //     "There isn't a way to let compiled code access a new
@@ -67,17 +226,20 @@ namespace ktx
             //
             //     "In the future using different address spaces or techniques
             //     with reference types may open up some possibilities here."
-            memoryView.call<void>("set", data);
+            std::unique_ptr<uint8_t[]> bytes;
+            size_t size;
+            KTX_error_code result = copyFromJS(data, bytes, size);
 
             // Load the image data now, otherwise we'd have to  copy it from
             // JS into a buffer only for it to be copied from that buffer into
             // the texture later.
             ktxTexture* ptr = nullptr;
-            KTX_error_code result = ktxTexture_CreateFromMemory(
-                                        bytes.data(),
-                                        bytes.size(),
-                                        KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
-                                        &ptr);
+            if (result == KTX_SUCCESS)
+                result = ktxTexture_CreateFromMemory(
+                             bytes.get(),
+                             size,
+                             KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT,
+                             &ptr);
             if (result != KTX_SUCCESS)
             {
                 std::cout << "ERROR: Failed to create from memory: " << ktxErrorString(result) << std::endl;
@@ -103,11 +265,88 @@ namespace ktx
         // This is needed because embind cannot do constructor overloads
         // where only the parameter type(s) differ. See
         // class_<ktx::texture> in EMSCRIPTEN_BINDINGS below for more
-        // details.
-        texture createCopy()
+        // details. Returns null when the copy fails, e.g. for a texture from
+        // createStreaming, which has no image data to copy.
+        std::unique_ptr<texture> createCopy()
         {
-            texture textureCopy(*this);
+            std::unique_ptr<texture> textureCopy{ new texture(*this) };
+            if (!textureCopy->m_ptr)
+                return nullptr;
             return textureCopy;
+        }
+
+        // Create a texture without image data from the start of a
+        // serialized KTX2 file, for processing its levels one at a time.
+        static std::unique_ptr<texture> createStreaming(const val& fileStart)
+        {
+            std::unique_ptr<uint8_t[]> bytes;
+            size_t size;
+            ktx_error_code_e result = copyFromJS(fileStart, bytes, size);
+            ktxTexture2* ptr = nullptr;
+            // Without KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT the texture
+            // keeps reading from a stream over the bytes, which therefore
+            // have to live as long as the texture.
+            if (result == KTX_SUCCESS)
+                result = ktxTexture2_CreateFromMemory(bytes.get(), size,
+                                                      KTX_TEXTURE_CREATE_NO_FLAGS,
+                                                      &ptr);
+            if (result != KTX_SUCCESS) {
+                std::cout << "ERROR: Failed to createStreaming: " << ktxErrorString(result) << std::endl;
+                return nullptr;
+            }
+
+            std::unique_ptr<texture> streaming{ new texture() };
+            uint8_t* fileStartBytes = bytes.release();
+            streaming->m_ptr.reset(reinterpret_cast<ktxTexture*>(ptr),
+                                   [fileStartBytes](ktxTexture* p) {
+                                       ktxTexture_Destroy(p);
+                                       delete[] fileStartBytes;
+                                   });
+            return streaming;
+        }
+
+        // The 64-bit values are returned as Numbers, so values a Number
+        // cannot hold exactly are reported as KTX_FILE_OVERFLOW.
+        val getLevelFileInfo(uint32_t level) const
+        {
+            const ktx_uint64_t maxSafeInteger = (1ull << 53) - 1;
+            ktxLevelFileInfo info;
+            ktx_error_code_e result = KTX_INVALID_OPERATION;
+            if (isTexture2())
+                result = ktxTexture2_GetLevelFileInfo(*this, level, &info);
+            if (result == KTX_SUCCESS
+                && (info.byteLength > maxSafeInteger
+                    || info.byteOffset > maxSafeInteger - info.byteLength
+                    || info.uncompressedByteLength > maxSafeInteger))
+                result = KTX_FILE_OVERFLOW;
+            if (result != KTX_SUCCESS) {
+                std::cout << "ERROR: Failed to getLevelFileInfo: " << ktxErrorString(result) << std::endl;
+                return val::null();
+            }
+
+            val fileInfo = val::object();
+            fileInfo.set("byteOffset", static_cast<double>(info.byteOffset));
+            fileInfo.set("byteLength", static_cast<double>(info.byteLength));
+            fileInfo.set("uncompressedByteLength",
+                         static_cast<double>(info.uncompressedByteLength));
+            return fileInfo;
+        }
+
+        std::unique_ptr<level_processor>
+        createBasisLevelProcessor(ktx_transcode_fmt_e targetFormat,
+                                  ktx_transcode_flags transcodeFlags) const
+        {
+            ktxLevelProcessor* processor = nullptr;
+            ktx_error_code_e result = KTX_INVALID_OPERATION;
+            if (isTexture2())
+                result = ktxLevelProcessor_CreateBasis(*this, targetFormat,
+                                                       transcodeFlags,
+                                                       &processor);
+            if (result != KTX_SUCCESS) {
+                std::cout << "ERROR: Failed to createBasisLevelProcessor: " << ktxErrorString(result) << std::endl;
+                return nullptr;
+            }
+            return std::make_unique<level_processor>(processor, m_ptr);
         }
 
         val findKeyValue(const std::string key)
@@ -250,6 +489,10 @@ namespace ktx
             }
             if (imageByteLength >  ptr->dataSize) {
                 std::cout << "ERROR: getImage: not enough data in texture." << std::endl;
+                return val::null();
+            }
+            if (ptr->pData == nullptr) {
+                std::cout << "ERROR: getImage: texture has no image data." << std::endl;
                 return val::null();
             }
             return val(emscripten::typed_memory_view(imageByteLength,
@@ -672,14 +915,15 @@ interface basisParams {  // **
 };
 
 interface texture {
-    constructor(ArrayBufferView fileData);
+    constructor(BufferSource fileData);
     constructor(textureCreateInfo createInfo, // **
                 CreateStorageEnum? storage);
+    static texture? createStreaming(BufferSource fileStart);
 
     error_code compressAstc(ktxAstcParams params); // **
     error_code decodeAstc(ktxAstcParams params);
     error_code compressBasis(ktxBasisParams params); // **
-    texture createCopy();  // **
+    texture? createCopy();  // **
     error_code defateZLIB();   // **
     error_code deflateZstd();  // **
     ArrayBufferView getImage(long level, long layer, long faceSlice);
@@ -688,6 +932,10 @@ interface texture {
                                   ArrayBufferView imageData); // **
     error_code transcodeBasis(transcode_fmt? target, transcode_flag_bits
                               decodeFlags);
+    LevelFileInfo? getLevelFileInfo(long level);
+    levelProcessor? createBasisLevelProcessor(transcode_fmt target,
+                                              transcode_flag_bits
+                                              transcodeFlags);
     ArrayBufferView writeToMemory(); // **
     error_code addKVPairString(DOMString key, DOMString value);     // **
     error_code addKVPairByte(DOMString key, ArrayBuffewView value); // **
@@ -708,6 +956,25 @@ interface texture {
 
     attribute khr_df_transfer OETF;       // Setting available only in libktx.js.
     attribute khr_df_primaries primaries; // Setting available only in libktx.js.
+};
+
+interface LevelFileInfo {
+    readonly attribute double byteOffset;
+    readonly attribute double byteLength;
+    readonly attribute double uncompressedByteLength;
+};
+
+interface levelProcessor {
+    long? getLevelSize(long level);
+    long? getImageSize(long level);
+    long? getImageOffset(long level, long layer, long faceSlice);
+    processedLevel? processLevel(long level, BufferSource payload);
+
+    readonly attribute long outputVkFormat;
+};
+
+interface processedLevel {
+    Uint8Array getTypedMemoryView();
 };
 
 enum error_code = {
@@ -1087,6 +1354,84 @@ be necessary to expose the ktxTexture_IterateLevelFaces or
 ktxTexture_IterateLoadLevelFaces API to JS with those calling a
 callback in JS to upload each image to WebGL.
 
+# Transcoding a texture level by level
+
+A texture being streamed can be transcoded one level at a time as each
+level's data arrives, e.g. from HTTP Range requests, without the whole file
+in memory. @c ktx.texture.createStreaming creates the texture from the start
+of the file only: the header, the level index, the DFD, the key/value data
+and the supercompression global data, which the header locates. The texture
+has no image data and keeps a copy of those bytes. @c getLevelFileInfo gives
+where the data of each level is in the file, and a processor from
+@c createBasisLevelProcessor transcodes the data of one level at a time,
+giving the same result as @c transcodeBasis gives for the level. Reuse the
+processor for all the levels. They can be processed in any order.
+
+@code{.js}
+    // fetchRange(url, offset, length) is your function. It returns a promise
+    // that is fulfilled with a Uint8Array of the bytes.
+    async function loadLevels(url, target) {
+      const header = new DataView((await fetchRange(url, 0, 80)).slice().buffer);
+      const levelCount = Math.max(1, header.getUint32(40, true));
+      const startLength = Math.max(
+          80 + levelCount * 24,                                    // level index
+          header.getUint32(48, true) + header.getUint32(52, true), // DFD
+          header.getUint32(56, true) + header.getUint32(60, true), // key/value data
+          Number(header.getBigUint64(64, true)
+                 + header.getBigUint64(72, true)));                 // supercompression global data
+
+      const ktexture = ktx.texture.createStreaming(
+                           await fetchRange(url, 0, startLength));
+      if (ktexture === null)
+        return;
+      const processor = ktexture.createBasisLevelProcessor(target, 0);
+      if (processor !== null) {
+        // Smallest level first, so something can be shown as early as possible.
+        for (let level = levelCount - 1; level >= 0; level--) {
+          const levelInfo = ktexture.getLevelFileInfo(level);
+          const payload = await fetchRange(url, levelInfo.byteOffset,
+                                           levelInfo.byteLength);
+          const processed = processor.processLevel(level, payload);
+          if (processed === null)
+            break;
+          // Upload the level, in format processor.outputVkFormat.
+          // processor.getImageOffset and getImageSize give where each layer,
+          // face or depth slice of the level is in the view.
+          uploadLevel(level, processed.getTypedMemoryView());
+          processed.delete();
+        }
+        processor.delete();
+      }
+      ktexture.delete();
+    }
+@endcode
+
+As elsewhere in the binding, a function that fails prints the error and
+returns @c null.
+
+@c createStreaming and @c processLevel take an ArrayBuffer or any
+ArrayBufferView, including a view of the WASM memory. A payload must be the
+level's @c byteLength bytes: @c processLevel fails with @c INVALID_VALUE
+before copying one of another length.
+
+@c getTypedMemoryView returns a view of the processed level in the WASM
+memory, not a copy. It is valid until the @c processedLevel is deleted or the
+WASM memory grows, which any call into the module can do. Copy it, e.g. with
+@c slice(), to keep the data.
+
+A texture from @c createStreaming is for its metadata, @c getLevelFileInfo
+and @c createBasisLevelProcessor. Functions that need the image data, e.g.
+@c getImage, @c transcodeBasis and @c createCopy, fail, as the texture does
+not have it. Only when it was created from the whole file do they load the
+image data into the texture, which then no longer describes the file: its
+processors fail with @c INVALID_OPERATION. A processor keeps the texture it
+was created from, so the texture can be deleted before the processor.
+
+The values of @c LevelFileInfo are Numbers. @c getLevelFileInfo fails with
+@c FILE_OVERFLOW for a value a Number cannot hold exactly. Video textures are
+not supported yet: @c createBasisLevelProcessor fails with
+@c UNSUPPORTED_FEATURE.
+
 # Creating a new KTX texture
 
 This function shows the main steps:
@@ -1369,6 +1714,10 @@ EMSCRIPTEN_BINDINGS(ktx)
         .function("glUpload", &ktx::texture::glUpload)
         .function("decodeAstc", &ktx::texture::decodeAstc)
         .function("transcodeBasis", &ktx::texture::transcodeBasis)
+        .class_function("createStreaming", &ktx::texture::createStreaming)
+        .function("getLevelFileInfo", &ktx::texture::getLevelFileInfo)
+        .function("createBasisLevelProcessor",
+                  &ktx::texture::createBasisLevelProcessor)
 #if KTX_FEATURE_WRITE
         .constructor<const ktxTextureCreateInfo&, ktxTextureCreateStorageEnum>()
         .function("compressAstc", &ktx::texture::compressAstc)
@@ -1383,6 +1732,19 @@ EMSCRIPTEN_BINDINGS(ktx)
         .function("setImageFromMemory", &ktx::texture::setImageFromMemory)
         .function("writeToMemory", &ktx::texture::writeToMemory)
 #endif
+    ;
+
+    class_<ktx::level_processor>("levelProcessor")
+        .property("outputVkFormat", &ktx::level_processor::outputVkFormat)
+        .function("getLevelSize", &ktx::level_processor::getLevelSize)
+        .function("getImageSize", &ktx::level_processor::getImageSize)
+        .function("getImageOffset", &ktx::level_processor::getImageOffset)
+        .function("processLevel", &ktx::level_processor::processLevel)
+    ;
+
+    class_<ktx::processed_level>("processedLevel")
+        .function("getTypedMemoryView",
+                  &ktx::processed_level::getTypedMemoryView)
     ;
 
 #if KTX_FEATURE_WRITE
