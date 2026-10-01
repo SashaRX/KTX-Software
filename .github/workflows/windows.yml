@@ -54,6 +54,7 @@ jobs:
     # Shortcircuit and don't burn CI time when formatting will reject
     #needs: formatting
     strategy:
+      fail-fast: false
       matrix:
         os: [ windows-latest ]
         generator: [ 'Visual Studio 18 2026' ]
