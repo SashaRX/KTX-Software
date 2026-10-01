@@ -20,7 +20,7 @@ PRIVATE
 
 target_link_libraries(
     transcodetests
-    gtest
+    GTest::gtest_main
     ktx
     "$<${is_stdformat_unsupported}:fmt::fmt>"
     obj_basisu_cbind
