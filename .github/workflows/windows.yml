@@ -225,7 +225,7 @@ jobs:
           core.exportVariable('NUGET_FEED_URL', 'https://nuget.pkg.github.com/KhronosGroup/index.json' || '');
 
     - name: Add NuGet sources for vcpkg binary caching
-      if: matrix.options.loadtests != 'OFF'
+      if: matrix.options.loadtests != 'OFF' && github.repository == 'KhronosGroup/KTX-Software'
       env:
         USERNAME: KhronosGroup
       shell: pwsh
@@ -306,7 +306,8 @@ jobs:
     - name: Build Windows
       if: matrix.check_mkvk != 'ONLY'
       env:
-        VCPKG_BINARY_SOURCES: clear;nuget,${{ env.NUGET_FEED_URL }},readwrite
+        # Fork tokens cannot publish to KhronosGroup's package cache.
+        VCPKG_BINARY_SOURCES: ${{ github.repository == 'KhronosGroup/KTX-Software' && format('clear;nuget,{0},readwrite', env.NUGET_FEED_URL) || 'clear;default,readwrite' }}
       #   The installers run as part of "Install Dependencies" add
       # environment variables to the registry and augment $Path there.
       # Although each step gets a new Powershell instance, that instance
