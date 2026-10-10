@@ -42,7 +42,25 @@ runs:
       if: ${{ runner.os == 'Windows' }}
       shell: pwsh
       run: |
-        choco install graphviz --yes --no-progress
+        Import-Module "$env:ChocolateyInstall/helpers/chocolateyInstaller.psm1"
+        $dot = Get-Command dot.exe -ErrorAction SilentlyContinue
+        for ($attempt = 1; !$dot -and $attempt -le 3; $attempt++) {
+          choco install graphviz --yes --no-progress
+          # The feed can fail while choco still exits 0. Check the installed tool.
+          Update-SessionEnvironment
+          $dot = Get-Command dot.exe -ErrorAction SilentlyContinue
+          if (!$dot -and $attempt -lt 3) {
+            Start-Sleep -Seconds 10
+          }
+        }
+        if (!$dot) {
+          throw "Graphviz dot.exe is unavailable after 3 installation attempts."
+        }
+        & $dot.Source -V
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # Publish the resolved directory for subsequent Actions steps.
+        $graphvizBin = Split-Path -Parent $dot.Source
+        $graphvizBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: "Check Graphviz installation"
       #if: ${{ inputs.graphviz == 'true' }}
