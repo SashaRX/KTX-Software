@@ -171,7 +171,9 @@ ktx2transcoderFormat(ktx_transcode_fmt_e ktx_fmt) {
  *                              does not have power-of-two dimensions.
  * @exception KTX_INVALID_VALUE @p outputFormat is invalid.
  * @exception KTX_TRANSCODE_FAILED
- *                              Something went wrong during transcoding.
+ *                              Something went wrong during transcoding,
+ *                              including BasisLZ palettes or tables that
+ *                              cannot be decoded.
  * @exception KTX_UNSUPPORTED_FEATURE
  *                              KTX_TF_PVRTC_DECODE_TO_NEXT_POW2 was requested
  *                              or the specified transcode target has not been
@@ -539,7 +541,9 @@ ktx2transcoderFormat(ktx_transcode_fmt_e ktx_fmt) {
  * @exception KTX_FILE_DATA_ERROR
  *                              Supercompression global data is corrupted.
  * @exception KTX_TRANSCODE_FAILED
- *                              Something went wrong during transcoding. The
+ *                              The palettes or tables in the supercompression
+ *                              global data cannot be decoded or something
+ *                              else went wrong during transcoding. The
  *                              texture object will be corrupted.
  * @exception KTX_OUT_OF_MEMORY Not enough memory to carry out transcoding.
  */
