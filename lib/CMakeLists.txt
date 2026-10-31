@@ -175,6 +175,9 @@ set(LIBKTX_MAIN_SRC
     src/astc_codec.cpp
     src/basis_sgd.h
     src/basis_transcode.cpp
+    src/basis_transcode.h
+    src/level_processor.cpp
+    src/level_processor.h
     src/miniz_wrapper.cpp
     src/checkheader.c
     src/etcunpack.cxx
@@ -528,6 +531,10 @@ macro(common_libktx_settings target enable_write library_type)
         )
     endif()
 
+    # gl_funcs.c and vk_funcs.c call dlopen and dlsym. Before glibc 2.34
+    # they are in libdl.
+    target_link_libraries(${target} PRIVATE ${CMAKE_DL_LIBS})
+
 endmacro(common_libktx_settings)
 
 macro(add_lib_dependencies target lib)
@@ -665,6 +672,8 @@ if(APPLE_MAC_OS_UNIVERSAL)
     # Set ordinary variable to override astc-encoder option's ON default
     # and hide the option.
     set(ASTCENC_UNIVERSAL_BUILD ON)
+else()
+    set(ASTCENC_UNIVERSAL_BUILD OFF)
 endif()
 
 # If we detect the user is doing a universal build defer to astc-encoder
